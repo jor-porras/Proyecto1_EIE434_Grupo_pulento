@@ -1,83 +1,99 @@
-# =============================================================================
-# main.py - Tarea 1 Programación 2 (PUCV)
-# Integración de Módulos de Robótica y IA: "Robot Limpiaplayas"
-# =============================================================================
-
-import os
-import numpy as np
-
-# 1. IMPORTACIÓN DE MÓDULOS 
-from data.robot_base import cargar_experimentos, generar_trayectoria_ideal, simular_lidar
-from processing.cinematicas import calcular_movimiento, calcular_error_seguimiento, distancia_al_objetivo
-from processing.metricas import calcular_todas_las_metricas, calcular_mejora
-from visualization.graficos import plot_metricas, plot_lidar, plot_trayectorias
+# ==========================================
+# main.py (Código del Profesor)
+# ==========================================
+from modelos_robot import RobotTresRuedas, RobotOruga, RobotDron
+from robot_base import RobotBase
+import analisis
+import visualizacion
+import math
 
 def main():
-    print("--- INICIANDO SISTEMA DE EVALUACIÓN: PLAYABOT 2026 ---")
-
-    # --- PASO 1: Carga de Datos Estáticos  ---
-    # Cargamos el diccionario de diccionarios con los datos del paper
-    datos_paper = cargar_experimentos()
+    print("Iniciando despliegue de la flota de limpieza...\n")
     
-    # --- PASO 2: Validación Cinemática ---
-    print("\n[VALIDACIÓN] Verificando modelo físico del robot...")
-    x_test, y_test, th_test = 0.0, 0.0, 0.0
-    v_test, w_test = 0.5, 0.1  # Velocidades de prueba
+    # Definimos la meta u objetivo al cual se deben dirigir los robots
+    # Aquí es donde ocurre la simulación de ruta guiada
+    x_goal = 5.0
+    y_goal = 5.0
     
-    # Probamos el movimiento unitario
-    x_n, y_n, th_n = calcular_movimiento(x_test, y_test, th_test, v_test, w_test)
-    # Verificamos qué tan lejos quedó de una meta arbitraria (1,1)
-    dist_test = distancia_al_objetivo(x_n, y_n, x_meta=1.0, y_meta=1.0)
+    # 1. POLIMORFISMO Y HERENCIA: Instanciación con atributos propios
+    flota = [
+        RobotTresRuedas("Triciclo-01", radio_rueda=15.0),
+        RobotOruga("Tanque-Limpio", tension_oruga=85.0),
+        RobotDron("Aero-Sweep", altura_maxima=20.0)
+    ]
     
-    print(f" > Pose inicial: (0,0,0) -> Nueva Pose: ({x_n:.2f}, {y_n:.2f}, {th_n:.2f} rad)")
-    print(f" > Distancia restante al objetivo (1,1): {dist_test:.2f}m")
-
-    # --- PASO 3: Simulación de Sensor LiDAR  ---
-    print("\n[SENSOR] Generando lectura de 36 sectores...")
-    angulos, dist_reales, dist_norm = simular_lidar(n_sectores=36)
-    plot_lidar(angulos, dist_reales, dist_norm)
-
-    # --- PASO 4: Evaluación de Trayectorias ---
-    print("\n[NAVEGACIÓN] Evaluando seguimiento de rutas...")
+    # Asignamos explícitamente el objetivo a cada robot
+    for robot in flota:
+        robot.target_x = x_goal
+        robot.target_y = y_goal
     
-    # A) RUTA TRIANGULAR
-    ruta_tri = [[0, 0], [4, 0], [2, 4], [0, 0]]
-    x_id_tri, y_id_tri = generar_trayectoria_ideal(ruta_tri)
+    # Demostración de métodos específicos (cada robot hace algo distinto antes de partir)
+    print("--- Calibración Inicial ---")
+    flota[0].calibrar_giro()
+    flota[1].ajustar_tension()
+    flota[2].despegar()
+    print("---------------------------\n")
+
+    historial_datos = []
+
+    # 2. SIMULACIÓN: 20 pasos de limpieza
+    for paso in range(1, 21):
+        print(f"\n[ Paso de Simulación: {paso} ]")
+        for robot in flota:
+            # Cada robot usa su polimorfismo para mover y limpiar
+            recompensa, llegamos = robot.mover()
+            robot.limpiar() 
+            
+            # Extraemos la posición y orientación usando encapsulamiento (getters)
+            # Notar que ahora utilizamos get_yaw() que estaba definido pero sin uso en la versión anterior
+            pos_x = robot.get_pos_x()
+            pos_y = robot.get_pos_y()
+            yaw = robot.get_yaw()
+            
+            # USO DE MÉTODOS ESTÁTICOS: Monitoreamos la ruta utilizando los métodos de RobotBase
+            # Esto evalúa la distancia restante al objetivo y el error de giro (desviación)
+            distancia_restante = RobotBase.calc_dist_to_goal(pos_x, pos_y, x_goal, y_goal)
+            error_giro = RobotBase.calc_yaw_error(pos_x, pos_y, yaw, x_goal, y_goal)
+            
+            # Lógica en la ruta: Si la distancia es menor a 2.5 metros, se realiza una acción especial
+            # En este caso, simulamos que encuentran una "zona de alta suciedad" cerca de la meta
+            if distancia_restante < 2.5 and not llegamos:
+                print(f"  -> {robot.get_nombre()}: ¡Entrando a zona de aproximación! (Dist: {distancia_restante:.2f}m).")
+                # Un pequeño aumento extra de basura recolectada al estar cerca de la meta
+                # Nota: usamos el método protegido _recolectar_basura para mantener el encapsulamiento de la capacidad
+                robot._recolectar_basura(0.2)
+                
+            # Si el robot presenta un error angular alto (mayor a 45 grados), advertimos sobre la desviación
+            if abs(error_giro) > (math.pi / 4):
+                 print(f"  -> {robot.get_nombre()}: Advertencia de desvío de ruta (Error angular: {error_giro:.2f} rad).")
+            
+            # 3. ENCAPSULAMIENTO: Uso estricto de getters para registrar el historial
+            historial_datos.append([
+                paso,
+                robot.get_nombre(),
+                pos_x,
+                pos_y,
+                robot.get_bateria(),
+                robot.get_basura_recolectada()
+            ])
+            
+            if llegamos:
+                print(f"¡El robot {robot.get_nombre()} ha llegado a la meta en el paso {paso}!")
+
+    print("\nTurno finalizado. Procesando datos de rendimiento...\n")
+
+    # 4. ANÁLISIS (NumPy)
+    resultados = analisis.comparar_rendimiento(historial_datos)
     
-    # Simulamos lo que el robot hizo (PPO-Mask es más preciso que PPO)
-    x_ppo_tri = x_id_tri + np.random.normal(0, 0.12, len(x_id_tri))
-    y_ppo_tri = y_id_tri + np.random.normal(0, 0.12, len(y_id_tri))
-    x_mask_tri = x_id_tri + np.random.normal(0, 0.04, len(x_id_tri))
-    y_mask_tri = y_id_tri + np.random.normal(0, 0.04, len(y_id_tri))
+    print("--- Resultados de Eficiencia ---")
+    for nombre, datos in resultados.items():
+        print(f"Robot: {nombre}")
+        print(f"  - Batería consumida: {datos['consumo_bateria']:.1f}%")
+        print(f"  - Basura total: {datos['basura_total']:.1f} kg")
+        print(f"  - Eficiencia (kg/%): {datos['eficiencia']:.2f}")
 
-    plot_trayectorias(x_ppo_tri, y_ppo_tri, x_mask_tri, y_mask_tri, ruta_tri, "triangulo")
-
-    # B) RUTA CUADRADA
-    ruta_cuad = [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]
-    x_id_cuad, y_id_cuad = generar_trayectoria_ideal(ruta_cuad)
-    
-    x_ppo_cuad = x_id_cuad + np.random.normal(0, 0.15, len(x_id_cuad))
-    y_ppo_cuad = y_id_cuad + np.random.normal(0, 0.15, len(y_id_cuad))
-    x_mask_cuad = x_id_cuad + np.random.normal(0, 0.05, len(x_id_cuad))
-    y_mask_cuad = y_id_cuad + np.random.normal(0, 0.05, len(y_id_cuad))
-
-    plot_trayectorias(x_ppo_cuad, y_ppo_cuad, x_mask_cuad, y_mask_cuad, ruta_cuad, "cuadrado")
-
-    # --- PASO 5: Análisis de Métricas  ---
-    # Usamos la ruta cuadrada para calcular el error matemático real
-    errores_cuad_ppo = calcular_error_seguimiento(x_ppo_cuad, y_ppo_cuad, x_id_cuad, y_id_cuad)
-    res_cuad = calcular_todas_las_metricas(errores_cuad_ppo, dt=0.1)
-    
-    print(f"\n[MÉTRICAS] Resultados PPO en Ruta Cuadrada:")
-    for metrica, valor in res_cuad.items():
-        print(f" > {metrica}: {valor}")
-
-    # --- PASO 6: Comparativa Final del Paper  ---
-    # Graficamos los datos históricos de la Tabla 6
-    plot_metricas(datos_paper, ambiente="real", ruta="simple")
-    
-    print("\n--- PROCESO FINALIZADO ---")
-    print("Revise la carpeta 'resultados_graficos' para ver los reportes visuales.")
+    # 5. VISUALIZACIÓN (Matplotlib)
+    visualizacion.graficar_recoleccion_vs_bateria(resultados)
 
 if __name__ == "__main__":
     main()
