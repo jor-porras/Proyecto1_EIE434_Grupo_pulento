@@ -7,7 +7,7 @@ import os
 import numpy as np
 
 # 1. IMPORTACIÓN DE MÓDULOS 
-from data.robot_data import cargar_experimentos, generar_trayectoria_ideal, simular_lidar
+from data.robot_base import cargar_experimentos, generar_trayectoria_ideal, simular_lidar
 from processing.cinematicas import calcular_movimiento, calcular_error_seguimiento, distancia_al_objetivo
 from processing.metricas import calcular_todas_las_metricas, calcular_mejora
 from visualization.graficos import plot_metricas, plot_lidar, plot_trayectorias
